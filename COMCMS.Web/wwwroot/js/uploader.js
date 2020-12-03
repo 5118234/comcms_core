@@ -43,7 +43,10 @@ $(function () {
                     //'DelFilePath': '' //定义参数
                 },
                 fileVal: 'Filedata', //上传域的名称
-                fileSingleSizeLimit: p.filesize * 1024 //文件大小
+                fileSingleSizeLimit: p.filesize * 1024, //文件大小
+                compress: false,
+                noCompressIfLarger: false,
+                compressSize: 0
             });
 
             //当validate不通过时，会以派送错误事件的形式通知
@@ -120,6 +123,14 @@ $(function () {
                     if (!p.multiple) {
                         //parentObj.siblings(".upload-name").val(data.name);
                         parentObj.siblings(".upload-path").val(data.path);
+                        //处理vue的问题
+                        var listname = parentObj.siblings(".upload-path").data("listname");
+                        var itemKey = parentObj.siblings(".upload-path").data("key");
+                        var itemIndex = parentObj.siblings(".upload-path").data("index");
+                        //console.log("当前：",listname, itemKey, itemIndex);
+                        if (listname && itemKey && app) {
+                            app[listname][itemIndex][itemKey] = data.path;
+                        }
                         //parentObj.siblings(".upload-size").val(data.size);
                     } else {
                         addImage(parentObj, data.path, data.thumb);

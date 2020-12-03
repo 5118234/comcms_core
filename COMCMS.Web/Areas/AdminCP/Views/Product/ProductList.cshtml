@@ -1,6 +1,12 @@
 ﻿
 @{
     ViewBag.title = "商品管理";
+    Admin my = Admin.GetMyInfo();
+    List<int> aclist = new List<int>();
+    if (my.Roles.IsSuperAdmin != 1 && !string.IsNullOrEmpty(my.Roles.AuthorizedCagegory))
+    {
+        aclist = Newtonsoft.Json.JsonConvert.DeserializeObject<List<int>>(my.Roles.AuthorizedCagegory);
+    }
 }
 <div class="wrapper wrapper-content">
     <div class="ibox float-e-margins">
@@ -21,7 +27,18 @@
                                 <option value="0">所有分类</option>
                                 @foreach (var m in ViewBag.ListKinds)
                                 {
-                                    <option value="@m.Id">@m.KindName</option>
+
+                                    if (my.Roles.IsSuperAdmin != 1 && aclist.Count > 0)
+                                    {
+                                        if (aclist.FindIndex(x => x == m.Id) > -1)
+                                        {
+                                            <option value="@m.Id">@m.KindName</option>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <option value="@m.Id">@m.KindName</option>
+                                    }
                                 }
                             </select>
                             <label class="checkbox-inline i-checks">
@@ -156,8 +173,9 @@
                             var temp = {   //这里的键的名字和控制器的变量名必须一直，这边改动，控制器也需要改成一样的
                                 limit: params.limit,   //页面大小
                                 page: (params.offset / params.limit)+1,  //页码
-                                kid:$("#kid").val(),
-                                departmentname: $("#keyword").val()
+                                kid: $("#kid").val(),
+                                keyword: $("#keyword").val(),
+                                isshowsub: $("#isshowsub").prop("checked") ? 1 : 0
                             };
                             return temp;
                         };

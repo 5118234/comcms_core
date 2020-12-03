@@ -10,14 +10,15 @@ using XCode;
 using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json;
 using COMCMS.Web.Common;
+using System.Diagnostics;
 
 namespace COMCMS.Web.Areas.AdminCP.Controllers
 {
     [Area("AdminCP")]
     public class IndexController : AdminBaseController
     {
-        private readonly IHostingEnvironment _env;
-        public IndexController(IHostingEnvironment env)
+        private readonly IWebHostEnvironment _env;
+        public IndexController(IWebHostEnvironment env)
         {
             _env = env;
         }
@@ -32,7 +33,6 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
 
             Admin admin = Admin.GetMyInfo();
             ViewBag.admin = admin;
-
             //获取菜单
             List<AdminMenu> list = new List<AdminMenu>();
             //这里需要获取权限，暂时先所有
@@ -61,6 +61,9 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
             ViewBag.host = host;
             ViewBag.contentPath = _env.ContentRootPath;
             ViewBag.rootPath = _env.WebRootPath;
+
+            Admin admin = Admin.GetMyInfo();
+            ViewBag.admin = admin;
 
             return View();
         }

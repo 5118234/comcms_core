@@ -15,139 +15,441 @@ using Microsoft.Extensions.Configuration.Json;
 using Microsoft.AspNetCore.Http;
 using System.Collections.Concurrent;
 using Newtonsoft.Json;
+using COMCMS.Web.Common;
+using Microsoft.AspNetCore.Hosting;
 
 namespace COMCMS.Web.Controllers
 {
-    public class HomeController : Controller
+    public class HomeController : HomeBaseController
     {
-        public static IConfiguration Configuration { get; set; }
-        public ConcurrentDictionary<string, string> AllSession = new ConcurrentDictionary<string, string>();
+        private IWebHostEnvironment _env;
 
-        public HomeController(IConfiguration configuration)
+        public HomeController(IWebHostEnvironment env)
         {
-            //Configuration = new ConfigurationBuilder()
-            //    .SetBasePath(Directory.GetCurrentDirectory())
-            //    .AddJsonFile("appsettings.json", optional: true, reloadOnChange : true)
-            //    .Build();
-            Configuration = configuration;
+            _env = env;
         }
+
+        #region 首页
         public IActionResult Index()
         {
-            CookieOptions op = new CookieOptions
+            bool hasData = AdminMenu.FindCount(null, null, null, 0, 0) > 0;
+            if (!hasData)
             {
-                Expires = DateTime.Now.AddMinutes(10),
-                Path = "/",
-                HttpOnly = true
-            };
-            Response.Cookies.Append("abc", "123456", op);//用户名
-
-            
-
-            return View();
+                return Redirect("/Home/Install");
+            }
+            ViewBag.cfg = cfg;
+            ViewBag.about = Article.FindById(1);//关于我们
+            return View("~/Views/Home/Index.cshtml");
         }
+        #endregion
 
-        public IActionResult About()
-        {
-            ViewData["Message"] = "Your application description page.";
-            CookiesHelper.WriteCookie("abc", Utils.GetRandomChar(20), 10);
-            //sessiong
-            SessionHelper.WriteSession("bcd", Utils.GetRandomChar(20));
-            HttpContext.Session.SetString("abc", "123456");
 
-            return View();
-        }
-
-        public IActionResult Contact()
-        {
-            Link l = Link.Find(Link._.Id == 1);
-            l.Title = "😂😂😂😂";
-            l.Save();
-            return View(l);
-        }
-
+        #region 显示默认错误页面
         public IActionResult Error()
         {
             return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
         }
-
-        #region 测试
-        public IActionResult Test()
-        {
-            var css = Configuration.GetSection("connectionStrings");
-            var list = css.GetChildren();
-            if(list !=null && list.Count() > 0)
-            {
-
-            }
-            string s = "";
-            foreach (var item in list)
-            {
-                string connName = item.Path.Substring(item.Path.IndexOf(":") + 1);
-                string connectionString = css.GetSection(connName).GetSection("connectionString").Value;
-                string providerName = css.GetSection(connName).GetSection("providerName").Value;
-                s += item.Path.Substring(item.Path.IndexOf(":")+1)+ "|"+ Configuration.GetSection(item.Path+ ":connectionString").Value+"|" + Configuration.GetSection(item.Path + ":providerName").Value +"|"+connectionString+"|"+ providerName +"|||" + list.Count();
-            }
-
-            return Content(s);
-        }
-
-        public IActionResult Test2()
-        {
-            var settings = Path.Combine(Directory.GetCurrentDirectory(), "appsettings.json");
-            var css2 = new ConfigurationBuilder().AddJsonFile(settings).Build().GetSection("connectionStrings");
-
-            string s = "";
-            if (css2 != null)
-            {
-                foreach (var item in css2.GetChildren())
-                {
-                    var name = item.Path.Substring(item.Path.IndexOf(":") + 1);// item["name"];
-                    var constr = item["connectionString"];
-                    var provider = item["providerName"];
-                    s += $"{name}|{constr}|{provider}|||";
-                    //var type = DbFactory.GetProviderType(constr, provider);
-                    //if (type == null) XTrace.WriteLine("无法识别{0}的提供者{1}！", name, provider);
-
-                    //cs.Add(name, constr);
-                    //_connTypes.Add(name, type);
-                }
-
-            }
-
-            return Content(s);
-        }
         #endregion
 
-        #region MyRegion
-        public IActionResult Test3()
-        {
-            bool isok = false;
-            if(AllSession.TryAdd(HttpContext.Session.Id, HttpContext.Session.Id))
-            {
-                isok = true;
-            }
-
-            return Content(isok.ToString() + ":" + JsonConvert.SerializeObject(AllSession));
-        }
-        #endregion
-
-        #region 测试
+        #region 初始化安装
         [HttpGet]
-        public IActionResult Article(string title)
+        public IActionResult Install()
         {
-            return Content(title);
+            string lockPath = $"{_env.WebRootPath}{Path.DirectorySeparatorChar}install.lock";
+            if (System.IO.File.Exists(lockPath))
+            {
+                return EchoTip("COMCMS系统已经安装过，如果需要重新安装，请删除程序wwwroot目录下的install.lock文件！", false, "/");
+            }
+            //判断数据库类型 mysql mssql 暂时只支持这两种
+            string sqltype = "mysql";
+            string sqlProviderName = Utils.GetSetting("connectionStrings:dbconn:providerName");
+            if (sqlProviderName == "System.Data.SqlClient")
+            {
+                sqltype = "mssql";
+            }
+            bool hasData = AdminMenu.FindCount(null, null, null, 0, 0) > 0;
+            ViewBag.hasData = hasData;
+            ViewBag.sqltype = sqltype;
+            return View();
         }
         #endregion
 
-        public IActionResult Uploader()
+        #region 执行初始化数据库数据
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public IActionResult DoInstall()
         {
-            return View("~/Areas/AdminCP/Views/WebUploader/Uploader.cshtml");
+            string sitename = Request.Form["sitename"];
+            string siteurl = Request.Form["siteurl"];
+            string mysqltype = Request.Form["mysqltype"];
+            string username = Request.Form["username"];
+            string password = Request.Form["password"];
+            string password2 = Request.Form["password2"];
+
+            if (string.IsNullOrEmpty(sitename))
+            {
+                tip.Message = "请填写网站名称！";
+                return Json(tip);
+            }
+
+            if (string.IsNullOrEmpty(username))
+            {
+                tip.Message = "请输入用户名！";
+                return Json(tip);
+            }
+            if (username.Trim().Length<5)
+            {
+                tip.Message = "用户名不能小于4个字符！";
+                return Json(tip);
+            }
+
+            if (string.IsNullOrEmpty(password) || Utils.GetStringLength(password) < 5)
+            {
+                tip.Message = "登录密码不能为空或者长度小于5！";
+                return Json(tip);
+            }
+            if(password != password2)
+            {
+                tip.Message = "两次输入密码不一致，请重新输入！";
+                return Json(tip);
+            }
+            string sqltype = "mysql";
+            string sqlProviderName = Utils.GetSetting("connectionStrings:dbconn:providerName");
+            if (sqlProviderName == "System.Data.SqlClient")
+            {
+                sqltype = "mssql";
+            }
+
+            if(sqltype =="mysql" && string.IsNullOrEmpty(mysqltype))
+            {
+                tip.Message = "请选择系统Mysql服务器类型！";
+                return Json(tip);
+            }
+
+            string lockPath = $"{_env.WebRootPath}{Path.DirectorySeparatorChar}install.lock";
+            if (System.IO.File.Exists(lockPath))
+            {
+                tip.Message = "COMCMS系统已经安装过，如果需要重新安装，请删除程序wwwroot目录下的install.lock文件！";
+                return Json(tip);
+            }
+
+            //判断需要的sql文件
+            string sqlname = "comcms_sqlserver.sql";
+            if(sqltype == "mysql")
+            {
+                if (mysqltype == "linux")
+                    sqlname = "comcms_for_linux.sql";
+                else
+                    sqlname = "comcms_for_windows.sql";
+            }
+
+            string sqlPath = $"{_env.WebRootPath}{Path.DirectorySeparatorChar}install{Path.DirectorySeparatorChar}";
+            string sqlFullPath = Path.Combine(sqlPath, sqlname);
+
+            if (!System.IO.File.Exists(sqlFullPath))
+            {
+                tip.Message = "缺少初始化SQL文件！";
+                return Json(tip);
+            }
+            string fullsql = System.IO.File.ReadAllText(sqlFullPath);
+            //如果是mssql 需要替换一下 GO不能在程序中直接执行
+            if (sqltype == "mssql")
+            {
+                fullsql = fullsql.Replace("GO", ";");
+            }
+
+            Admin.FindAll(fullsql);//执行
+
+            //初始化
+            Config cfg = Config.FindById(1);
+            if(cfg != null)
+            {
+                cfg.SiteName = sitename;
+                cfg.SiteUrl = siteurl;
+                cfg.Update();
+            }
+
+            Admin admin = Admin.Find(Admin._.Id == 1);
+            if(admin != null)
+            {
+                admin.UserName = username;
+                admin.Salt = Utils.GetRandomChar(10);
+                admin.PassWord = Utils.MD5(admin.Salt + password);
+                admin.Update();
+            }
+
+
+            //写入Lock文件
+            System.IO.File.WriteAllText(lockPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+            tip.Message = "导入数据成功！";
+            tip.Status = JsonTip.SUCCESS;
+            tip.ReturnUrl = "/";
+            return Json(tip);
+        }
+        #endregion
+
+        #region 测试
+        //[Route("c/{*path}/index2.html")]
+        //public IActionResult Test(string path = "")
+        //{
+        //    var asms = AppDomain.CurrentDomain.GetAssemblies();
+        //    List<string> list = new List<string>();
+        //    foreach (var item in asms)
+        //    {
+        //        string fullName = item.GetName().ToString();
+        //        if (fullName.IndexOf("COMCMS.Web.Views")>-1)
+        //        {
+        //            var types = item.GetTypes().Where(e => e.Name.StartsWith("Views_Article")).ToList();
+        //            foreach (var type in types)
+        //            {
+        //                string viewName = type.Name.Replace("Views_Article_", "") + ".cshtml";
+        //                list.Add(viewName);
+        //            }
+
+        //        }
+        //        //list.Add(item.GetName().ToString());
+        //    }
+        //    return Content(JsonConvert.SerializeObject(list));
+        //}
+        //[Route("{path1:regex([[a-zA-Z0-9-]])}/{path2:regex([[a-zA-Z0-9-]])}/index.html")]
+        //public IActionResult Test2(string path1 = "", string path2 = "")
+        //{
+        //    ArticleController ac = new ArticleController();
+        //    return ac.Index(1);
+        //    //return Content(";ath1:" + path1+";path2:"+path2);
+        //}
+        #endregion
+
+
+        #region 系统文章栏目、商品栏目路由
+        /// <summary>
+        /// 一级路径栏目
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        [Route("{path:regex(^(?!swagger\\b)[[a-zA-Z0-9-]]+$)}/index.html")]
+        [Route("{path:regex(^(?!swagger\\b)[[a-zA-Z0-9-]]+$)}/index-{page:int}.html")]
+        //[Route("{path:regex(^(?!swagger\\b)[[a-zA-Z0-9-]]+$)}/")]
+        public IActionResult ShowCategory(string path,int page=1)
+        {
+            //先判断文章栏目
+            ArticleCategory articleCategory = ArticleCategory.FindByFilePath("/" + path);
+            if(articleCategory != null)
+            {
+                //return Content(articleCategory.Id.ToString());
+                ArticleController ac = new ArticleController();
+                return ac.Index(articleCategory.Id, page);
+            }
+            //再判断商品
+            Category category = Category.FindByFilePath("/" + path);
+            if(category != null)
+            {
+                ProductController pc = new ProductController();
+                return pc.Index(category.Id,page);
+            }
+            return EchoTip("系统找不到本栏目！"+"/"+path);
         }
 
-        public IActionResult FileTest()
+        /// <summary>
+        /// 二级路径栏目
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/index.html")]
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/index-{page:int}.html")]
+        //[Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/")]
+        public IActionResult ShowCategory(string path, string path2, int page = 1)
         {
+            string fullPath = $"/{path}/{path2}";
+            //先判断文章栏目
+            ArticleCategory articleCategory = ArticleCategory.FindByFilePath(fullPath);
+            if (articleCategory != null)
+            {
+                //return Content(articleCategory.Id.ToString());
+                ArticleController ac = new ArticleController();
+                return ac.Index(articleCategory.Id, page);
+            }
+            //再判断商品
+            Category category = Category.FindByFilePath(fullPath);
+            if (category != null)
+            {
+                ProductController pc = new ProductController();
+                return pc.Index(category.Id, page);
+            }
+            return EchoTip("系统找不到本栏目！" + path + "|" + path2);
+        }
+        /// <summary>
+        /// 三级路径栏目
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/index.html")]
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/index-{page:int}.html")]
+        //[Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/")]
+        public IActionResult ShowCategory(string path, string path2, string path3, int page = 1)
+        {
+            string fullPath = $"/{path}/{path2}/{path3}";
+            //先判断文章栏目
+            ArticleCategory articleCategory = ArticleCategory.FindByFilePath(fullPath);
+            if (articleCategory != null)
+            {
+                //return Content(articleCategory.Id.ToString());
+                ArticleController ac = new ArticleController();
+                return ac.Index(articleCategory.Id, page);
+            }
+            //再判断商品
+            Category category = Category.FindByFilePath(fullPath);
+            if (category != null)
+            {
+                ProductController pc = new ProductController();
+                return pc.Index(category.Id, page);
+            }
+            return EchoTip("系统找不到本栏目！" + fullPath);
+        }
+        /// <summary>
+        /// 四级路径栏目
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/{path4:regex(^[[a-zA-Z0-9-]]+$)}/index.html")]
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/{path4:regex(^[[a-zA-Z0-9-]]+$)}/index-{page:int}.html")]
+        //[Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/{path4:regex(^[[a-zA-Z0-9-]]+$)}/")]
+        public IActionResult ShowCategory(string path, string path2, string path3, string path4, int page = 1)
+        {
+            string fullPath = $"/{path}/{path2}/{path3}/{path4}";
+            //先判断文章栏目
+            ArticleCategory articleCategory = ArticleCategory.FindByFilePath(fullPath);
+            if (articleCategory != null)
+            {
+                //return Content(articleCategory.Id.ToString());
+                ArticleController ac = new ArticleController();
+                return ac.Index(articleCategory.Id,page);
+            }
+            //再判断商品
+            Category category = Category.FindByFilePath(fullPath);
+            if (category != null)
+            {
+                ProductController pc = new ProductController();
+                return pc.Index(category.Id, page);
+            }
+            return EchoTip("系统找不到本栏目！" + fullPath);
+        }
+        #endregion
+
+        #region 文章详情、商品详情
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="path"></param>
+        /// <param name="filename"></param>
+        /// <returns></returns>
+        [HttpGet]
+        [Route("{path:regex(^(?!swagger\\b)[[a-zA-Z0-9-]]+$)}/{filename:regex(^(?!index\\b)[[a-zA-Z0-9-]]+$)}.html")]
+        public IActionResult ShowDetail(string path, string filename)
+        {
+            string fullPath = $"/{path}";
+            //先判断文章栏目
+            ArticleCategory articleCategory = ArticleCategory.FindByFilePath(fullPath);
+            if (articleCategory != null)
+            {
+                Article article = null;
+                //判断文件名
+                if (Utils.IsInt(filename))
+                {
+                    article = Article.FindById(int.Parse(filename));
+                }
+                if (article == null)
+                {
+                    filename = filename + ".html";
+                    article = Article.FindByFileName(filename, articleCategory.Id);
+                }
+                if(article != null)
+                {
+                    ArticleController ac = new ArticleController();
+                    return ac.Detail(article.Id);
+                }
+            }
+            //再判断商品
+            Category category = Category.FindByFilePath(fullPath);
+            if (category != null)
+            {
+                Product product = null;
+                //判断文件名
+                if (Utils.IsInt(filename))
+                {
+                    product = Product.FindById(int.Parse(filename));
+                }
+                if (product == null)
+                {
+                    filename = filename + ".html";
+                    product = Product.FindByFileName(filename, articleCategory.Id);
+                }
+                if (product != null)
+                {
+                    ProductController pc = new ProductController();
+                    return pc.Detail(product.Id);
+                }
+            }
+
+            return EchoTip("系统找不到本详情！" + "/" + path + "/" + filename);
+        }
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="path"></param>
+        /// <param name="filename"></param>
+        /// <returns></returns>
+        [HttpGet]
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{filename:regex(^(?!index\\b)[[a-zA-Z0-9-]]+$)}.html")]
+        public IActionResult ShowDetail(string path, string path2, string filename)
+        {
+            string fullPath = $"{path}/{path2}";
+            return ShowDetail(fullPath, filename);
+        }
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="path"></param>
+        /// <param name="filename"></param>
+        /// <returns></returns>
+        [HttpGet]
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/{filename:regex(^(?!index\\b)[[a-zA-Z0-9-]]+$)}.html")]
+        public IActionResult ShowDetail(string path, string path2, string path3, string filename)
+        {
+            string fullPath = $"{path}/{path2}/{path3}";
+            return ShowDetail(fullPath, filename);
+        }
+        //四级
+        [HttpGet]
+        [Route("{path:regex(^[[a-zA-Z0-9-]]+$)}/{path2:regex(^[[a-zA-Z0-9-]]+$)}/{path3:regex(^[[a-zA-Z0-9-]]+$)}/{path4:regex(^[[a-zA-Z0-9-]]+$)}/{filename:regex(^(?!index\\b)[[a-zA-Z0-9-]]+$)}.html")]
+        public IActionResult ShowDetail(string path, string path2, string path3, string path4, string filename)
+        {
+            string fullPath = $"{path}/{path2}/{path3}/{path4}";
+            return ShowDetail(fullPath, filename);
+        }
+        #endregion
+
+        #region sitemap html
+        [Route("sitemap.html")]
+        [HttpGet]
+        public IActionResult SitemapHTML()
+        {
+            ViewBag.cfg = cfg;
             return View();
-
         }
+        #endregion
+
+        #region sitemap xml
+        [HttpGet]
+        [Route("sitemap.xml")]
+        public IActionResult SitemapXML()
+        {
+            Response.ContentType = "text/xml";
+            return View();
+        }
+        #endregion
+
     }
 }
+    

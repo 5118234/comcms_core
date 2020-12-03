@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -12,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace COMCMS.Web.Areas.AdminCP.Controllers
 {
+    [DisplayName("商品")]
     public class ProductController : AdminBaseController
     {
         #region 商品栏目
@@ -20,6 +22,7 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
         /// </summary>
         /// <returns></returns>
         [MyAuthorize("viewlist", "category")]
+        [DisplayName("商品栏目")]
         public IActionResult CategoryList()
         {
             IList<Category> list = Category.GetListTree(0, -1, false, true);
@@ -183,10 +186,32 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
             tip.Message = "删除商品栏目成功";
             return Json(tip);
         }
+
+        #region 修改商品分类排序
+        [HttpPost]
+        [MyAuthorize("edit", "category", "JSON")]
+        public IActionResult DoEditCategoryRank(int id, int rank)
+        {
+            Category entity = Category.Find(Category._.Id == id);
+            if (entity == null)
+            {
+                tip.Message = "系统找不到本记录";
+                return Json(tip);
+            }
+            entity.Rank = rank;
+            entity.Update();
+            Admin.WriteLogActions($"修改商品分类排序(id:{id},排序:{rank});");
+            tip.Message = "修改商品分类排序成功！";
+            tip.Status = JsonTip.SUCCESS;
+            return Json(tip);
+        }
+        #endregion
+
         #endregion
 
         #region 商品列表
         [MyAuthorize("viewlist", "product")]
+        [DisplayName("商品列表")]
         public IActionResult ProductList()
         {
             //获取上级栏目
@@ -204,7 +229,23 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
             numPerPage = limit;
             currentPage = page;
             startRowIndex = (currentPage - 1) * numPerPage;
-            Expression ex = Product._.Id > 0;
+            Expression ex = new Expression();
+
+            Admin my = Admin.GetMyInfo();
+            List<int> aclist = new List<int>();
+            if (my.Roles.IsSuperAdmin != 1)
+            {
+                aclist = JsonConvert.DeserializeObject<List<int>>(string.IsNullOrEmpty(my.Roles.AuthorizedCagegory) ? "[]" : my.Roles.AuthorizedCagegory);
+                if (aclist == null) aclist = new List<int>();
+                if (aclist.Count > 0)
+                {
+                    ex &= Product._.KId.In(aclist);
+                }
+
+                //仅显示有权限内容
+                if (my.Roles.OnlyEditMyselfProduct == 1)
+                    ex &= Product._.AuthorId == my.Id;
+            }
 
             if (!string.IsNullOrWhiteSpace(keyword))
             {
@@ -288,6 +329,24 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
                 tip.Message = "商品图片填写的不是图片格式！";
                 return Json(tip);
             }
+
+            Admin my = Admin.GetMyInfo();
+            List<int> aclist = new List<int>();
+            if (my.Roles.IsSuperAdmin != 1)
+            {
+                aclist = JsonConvert.DeserializeObject<List<int>>(string.IsNullOrEmpty(my.Roles.AuthorizedCagegory)?"[]": my.Roles.AuthorizedCagegory);
+                if (aclist == null) aclist = new List<int>();
+                if (aclist.Count > 0)
+                {
+                    if (aclist.FindIndex(x => x == model.KId) == -1)
+                    {
+                        tip.Message = "当前选择栏目不存在，或者您没这个栏目的权限！";
+                        return Json(tip);
+                    }
+                }
+
+            }
+
             //处理商品更多图片
             string[] moreImgSrc = Request.Form["nImgUrl"];
             string morIMG = string.Empty;//更多图片的时候用到
@@ -308,7 +367,7 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
                 model.Content = content;
             }
             model.ItemImg = morIMG;
-            model.AuthorId = Core.Admin.GetMyInfo().Id;
+            model.AuthorId = my.Id;
             model.Insert();
             Category.UpdateDetailCount(model.KId);
             //添加TAG
@@ -377,6 +436,29 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
                 tip.Message = "商品图片填写的不是图片格式！";
                 return Json(tip);
             }
+
+            Admin my = Admin.GetMyInfo();
+            List<int> aclist = new List<int>();
+            if (my.Roles.IsSuperAdmin != 1)
+            {
+                aclist = JsonConvert.DeserializeObject<List<int>>(string.IsNullOrEmpty(my.Roles.AuthorizedCagegory) ? "[]" : my.Roles.AuthorizedCagegory);
+                if (aclist == null) aclist = new List<int>();
+                if (aclist.Count > 0)
+                {
+                    if (aclist.FindIndex(x => x == model.KId) == -1)
+                    {
+                        tip.Message = "当前选择栏目不存在，或者您没这个栏目的权限！";
+                        return Json(tip);
+                    }
+                }
+
+                if (my.Roles.OnlyEditMyselfProduct == 1 && entity.AuthorId != my.Id)
+                {
+                    tip.Message = "系统限制，您无法编辑非自己添加的商品！";
+                    return Json(tip);
+                }
+            }
+
             //处理商品更多图片
             string[] moreImgSrc = Request.Form["nImgUrl"];
             string morIMG = string.Empty;//更多图片的时候用到
@@ -435,6 +517,29 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
                 tip.Message = "系统找不到本商品！";
                 return Json(tip);
             }
+
+            Admin my = Admin.GetMyInfo();
+            List<int> aclist = new List<int>();
+            if (my.Roles.IsSuperAdmin != 1)
+            {
+                aclist = JsonConvert.DeserializeObject<List<int>>(string.IsNullOrEmpty(my.Roles.AuthorizedCagegory) ? "[]" : my.Roles.AuthorizedCagegory);
+                if (aclist == null) aclist = new List<int>();
+
+                if (aclist.Count > 0)
+                {
+                    if (aclist.FindIndex(x => x == entity.KId) == -1)
+                    {
+                        tip.Message = "者您没这个栏目的权限，无法删除该栏目商品！";
+                        return Json(tip);
+                    }
+                }
+                if (my.Roles.OnlyEditMyselfArticle == 1 && entity.AuthorId != my.Id)
+                {
+                    tip.Message = "系统限制，您无法删除非自己添加的商品！";
+                    return Json(tip);
+                }
+            }
+
             int kid = entity.KId;
             //删除TAG
             //Tag.DeleteTag(RTType.RatuoModule.Article, entity.Id);

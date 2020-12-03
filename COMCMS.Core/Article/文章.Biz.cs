@@ -150,9 +150,114 @@ namespace COMCMS.Core
         #endregion
 
         #region 高级查询
+        /// <summary>
+        /// 通过FileName查找
+        /// </summary>
+        /// <param name="filename"></param>
+        /// <param name="kid"></param>
+        /// <returns></returns>
+        public static Article FindByFileName(string filename,int kid=0)
+        {
+            var where = _.FileName == filename;
+            if (kid > 0) where &= _.KId == kid;
+            return Find(where);
+        }
+
+
         #endregion
 
         #region 业务操作
+
+
+        /// <summary>
+        /// 获取上一条记录/前一条记录
+        /// </summary>
+        /// <param name="id">ID</param>
+        /// <returns></returns>
+        public static Article GetPrev(int id)
+        {
+            Article entity = Article.FindById(id);
+            if (entity != null)
+            {
+                //获取上一条记录
+                IList<Article> list = Article.FindAll(_.Id > entity.Id & _.KId == entity.KId & _.Sequence <= entity.Sequence, string.Format("{0} Desc,{1} Asc", _.Sequence, _.Id), null, 0, 1);
+                if (list != null && list.Count > 0)
+                    return list[0];
+                else
+                {
+                    list = Article.FindAll(_.Id != entity.Id & _.KId == entity.KId & _.Sequence < entity.Sequence, string.Format("{0} Desc,{1} Asc", _.Sequence, _.Id), null, 0, 1);
+                    if (list != null && list.Count > 0)
+                    {
+                        return list[0];
+                    }
+                    else
+                        return null;
+                }
+
+            }
+            else
+                return null;
+        }
+
+        /// <summary>
+        /// 获取下一条记录/后一条记录
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        public static Article GetNext(int id)
+        {
+            Article entity = Article.FindById(id);
+            if (entity != null)
+            {
+                //获取上一条记录
+                IList<Article> list = Article.FindAll(_.Id != entity.Id & _.KId == entity.KId & _.Sequence > entity.Sequence, string.Format("{0} Asc,{1} Desc", _.Sequence, _.Id), null, 0, 1);
+                if (list != null && list.Count > 0)
+                    return list[0];
+                else
+                {
+                    list = Article.FindAll(_.Id < entity.Id & _.KId == entity.KId & _.Sequence >= entity.Sequence, string.Format("{0} Asc,{1} Desc", _.Sequence, _.Id), null, 0, 1);
+                    if (list != null && list.Count > 0)
+                    {
+                        return list[0];
+                    }
+                    else
+                        return null;
+                }
+
+            }
+            else
+                return null;
+        }
+
+
+        /// <summary>
+        /// 获取前几条文章
+        /// </summary>
+        /// <param name="kid">栏目id</param>
+        /// <param name="records">条数</param>
+        /// <returns></returns>
+        public static IList<Article> FindTopList(int kid, int records, bool isShowSub = false)
+        {
+            if (!isShowSub)
+                return FindAll(_.KId == kid & _.IsHide == 0, _.Id.Desc(), null, 0, records);
+            else
+            {
+                Expression ex = _.IsHide == 0;
+                List<int> kids = new List<int>();
+                kids.Add(kid);
+                IList<ArticleCategory> subkinds = ArticleCategory.FindByParentID(kid);
+                if (subkinds != null && subkinds.Count > 0)
+                {
+                    foreach (var item in subkinds)
+                    {
+                        kids.Add(item.Id);
+                    }
+                }
+                ex &= Article._.KId.In(kids);
+
+                return FindAll(ex, _.Id.Desc(), null, 0, records);
+            }
+        }
         #endregion
     }
 }

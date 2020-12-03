@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -9,12 +10,24 @@ using XCode;
 using Newtonsoft.Json;
 using COMCMS.Web.Common;
 using Microsoft.AspNetCore.Http;
+using System.IO;
+using NewLife.Log;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.FileProviders;
+using System.Text;
 
 namespace COMCMS.Web.Areas.AdminCP.Controllers
 {
     [Area("AdminCP")]
+    [DisplayName("后台权限")]
     public class PermissionController : AdminBaseController
     {
+        private IWebHostEnvironment _env;
+        public PermissionController(IWebHostEnvironment env)
+        {
+            _env = env;
+        }
+
         #region 事件管理
         /// <summary>
         /// 目标事件
@@ -63,7 +76,7 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
 
         [MyAuthorize( "add",  "eventkey",  "JSON")]
         [HttpPost]
-        public IActionResult AddEventKey(FormCollection fc)
+        public IActionResult AddEventKey(IFormCollection fc)
         {
             TargetEvent entity = new TargetEvent();
             entity.EventKey = fc["EventKey"];
@@ -107,6 +120,7 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
         #region 后台栏目管理
         //后台菜单列表
         [MyAuthorize( "viewlist",  "adminmenu")]
+        [DisplayName("后台栏目")]
         public IActionResult AdminMenuList()
         {
             IList<AdminMenu> list = AdminMenu.GetListTree(0, -1, false, true);
@@ -324,6 +338,78 @@ namespace COMCMS.Web.Areas.AdminCP.Controllers
             tip.Status = JsonTip.SUCCESS;
             tip.Message = "删除后台菜单成功";
             return Json(tip);
+        }
+        #endregion
+
+        #region 系统运行日志
+        [HttpGet]
+        [MyAuthorize("viewlist", "runlogs")]
+        [DisplayName("系统运行日志")]
+        public IActionResult RunLogs()
+        {
+            string logPath = $"{_env.ContentRootPath}{Path.DirectorySeparatorChar}Log{Path.DirectorySeparatorChar}";
+            List<string> lognames = new List<string>();
+            try
+            {
+                if (Directory.Exists(logPath))
+                {
+                    DirectoryInfo directory = new DirectoryInfo(logPath);
+                    List<string> listFiles = new List<string>();
+                    DirectoryInfo[] directorys = directory.GetDirectories();
+                    FileInfo[] files;
+                    files = directory.GetFiles();
+                    foreach (FileInfo file in files)
+                    {
+                        lognames.Add(file.Name);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                XTrace.WriteException(ex);
+            }
+            lognames.Reverse();//倒序排列一下
+            ViewBag.logPath = logPath;
+            return View(lognames);
+        }
+        #endregion
+
+        #region 获取日志详情
+        [HttpPost]
+        [MyAuthorize("viewlist", "runlogs")]
+        public async Task<IActionResult> GetRunLogDetail(string logname)
+        {
+            if (string.IsNullOrEmpty(logname))
+            {
+                return Content("错误日志名称！");
+            }
+            string logPath = $"{_env.ContentRootPath}{Path.DirectorySeparatorChar}Log{Path.DirectorySeparatorChar}";
+            string logFullPath = logPath + logname;
+
+
+            if (!System.IO.File.Exists(logFullPath))
+            {
+                return Content("系统找不到本日志文件！");
+            }
+            //XTrace.WriteLine("查看日志：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+            IFileProvider fileProvider = new PhysicalFileProvider(logPath);
+            StringBuilder detail = new StringBuilder();
+            using (Stream stream = fileProvider.GetFileInfo(logname).CreateReadStream())
+            {
+                byte[] buffer = new byte[stream.Length];
+                await stream.ReadAsync(buffer, 0, buffer.Length);
+                detail.Append(Encoding.Default.GetString(buffer));
+            }
+
+
+            //using (StreamReader fs = new StreamReader(logFullPath))
+            //{
+            //    detail.Append(fs.ReadToEndAsync());
+            //}
+
+            //string detail = await System.IO.File.ReadAllTextAsync(logFullPath);
+            return Content(detail.ToString());
         }
         #endregion
     }

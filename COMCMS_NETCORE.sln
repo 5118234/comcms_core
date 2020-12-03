@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.27428.2037
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30523.141
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "COMCMS.Web", "COMCMS.Web\COMCMS.Web.csproj", "{BEE79494-B5B8-49D0-8040-818AE601C800}"
 EndProject
@@ -15,7 +15,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "COMCMS.API", "COMCMS.API\CO
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Lib.Core", "Lib.Core\Lib.Core.csproj", "{D95FC3C1-B035-4A19-A706-71C31DD1E52D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NewLife.UserGroup.WebUploader", "NewLife.UserGroup.WebUploader\NewLife.UserGroup.WebUploader.csproj", "{F8D6AE11-1436-44CA-BDD9-4AFD7B489DD0}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "NewLife.UserGroup.WebUploader", "NewLife.UserGroup.WebUploader\NewLife.UserGroup.WebUploader.csproj", "{F8D6AE11-1436-44CA-BDD9-4AFD7B489DD0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

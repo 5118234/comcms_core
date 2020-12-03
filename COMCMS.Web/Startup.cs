@@ -1,33 +1,35 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Unicode;
 using System.Threading.Tasks;
+using COMCMS.Common;
+using COMCMS.Web.Common;
+using COMCMS.Web.ExceptionHandler;
+using COMCMS.Web.Models;
+using Lib.Core.MiddlewareExtension.Extension;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.WebEncoders;
-using Microsoft.AspNetCore.Mvc;
-using COMCMS.Common;
-using COMCMS.Web.Models;
-using COMCMS.Web.Common;
-using COMCMS.Web.ExceptionHandler;
-using Lib.Core.MiddlewareExtension.Extension;
-using Senparc.Weixin.Entities;
+using Microsoft.IdentityModel.Tokens;
+using Newtonsoft.Json.Serialization;
 using Senparc.CO2NET;
+using Senparc.CO2NET.Cache;
 using Senparc.CO2NET.RegisterServices;
 using Senparc.Weixin;
-using Senparc.CO2NET.Cache;
-using System.Configuration;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Extensions.Options;
+using Senparc.Weixin.Entities;
 using Senparc.Weixin.RegisterServices;
-using Microsoft.AspNetCore.Routing.Constraints;
 
 namespace COMCMS.Web
 {
@@ -43,10 +45,6 @@ namespace COMCMS.Web
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            //注入自己的HttpContext
-            services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
-            //services.AddMvc().AddSessionStateTempDataProvider();
-
             //添加Configuration到静态变量
             Utils.AddUtils(Configuration);
 
@@ -65,45 +63,78 @@ namespace COMCMS.Web
             {
                 options.IdleTimeout = TimeSpan.FromSeconds(120);
                 options.Cookie.HttpOnly = true;
-                
+
             });
             //部分系统配置
             services.Configure<SystemSetting>(Configuration.GetSection("SystemSetting"));
 
-            services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_1); ;
+            services
+                .AddControllersWithViews(options =>
+                {
+                    //记录错误
+                    options.Filters.Add<HttpGlobalExceptionFilter>();
+                })
+                .AddNewtonsoftJson(options => {
+                    options.SerializerSettings.ContractResolver = new CamelCasePropertyNamesContractResolver();
+                    options.SerializerSettings.DateFormatString = "yyyy-MM-dd HH:mm:ss";
+                });
+
             //防止汉字被自动编码
             services.Configure<WebEncoderOptions>(options =>
             {
                 options.TextEncoderSettings = new TextEncoderSettings(UnicodeRanges.All);
             });
-            //记录错误
-            services.AddMvc(options =>
-            {
-                options.Filters.Add<HttpGlobalExceptionFilter>();
-            });
+
             services.AddSenparcGlobalServices(Configuration)//Senparc.CO2NET 全局注册
             .AddSenparcWeixinServices(Configuration);//Senparc.Weixin 注册（如果使用Senparc.Weixin SDK则添加）
 
             //注册Cookie认证服务
             services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie();
 
-            // 设置表单内容限制
-            services.Configure<FormOptions>(formOptions =>
+            // 配置JWT 验证
+            var appSettingsSection = Configuration.GetSection("SystemSetting");
+            var appSettings = appSettingsSection.Get<SystemSetting>();
+            var key = Encoding.ASCII.GetBytes(appSettings.JwtSecret);
+            services.AddAuthentication(x =>
             {
-                formOptions.ValueLengthLimit = int.MaxValue; // 表单内容大小限制，默认4194304，单位byte
-                formOptions.MultipartBodyLengthLimit = int.MaxValue; // 如果是multipart，默认134217728
+                x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            })
+            .AddJwtBearer(x =>
+            {
+                x.RequireHttpsMetadata = false;
+                x.SaveToken = true;
+                x.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ValidateIssuer = false,
+                    ValidateAudience = false
+                };
+            });
+
+            // 设置表单内容限制
+            services.Configure<FormOptions>(options =>
+            {
+                //formOptions.ValueLengthLimit = int.MaxValue; // 表单内容大小限制，默认4194304，单位byte
+                //formOptions.MultipartBodyLengthLimit = int.MaxValue; // 如果是multipart，默认134217728
+                options.ValueCountLimit = int.MaxValue;
+                options.ValueLengthLimit = int.MaxValue;
+                options.KeyLengthLimit = int.MaxValue;
+                options.MultipartBodyLengthLimit = int.MaxValue;
+                options.MultipartBoundaryLengthLimit = int.MaxValue;
             });
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env, IServiceProvider svp, IOptions<SenparcSetting> senparcSetting, IOptions<SenparcWeixinSetting> senparcWeixinSetting)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, IServiceProvider svp, IOptions<SenparcSetting> senparcSetting, IOptions<SenparcWeixinSetting> senparcWeixinSetting)
         {
             app.Use(async (context, next) =>
             {
                 context.Response.Headers.Add("X-Frame-Options", "SAMEORIGIN");
                 await next();
             });
-
+            
             if (env.IsDevelopment())
             {
 
@@ -114,7 +145,7 @@ namespace COMCMS.Web
                 app.UseExceptionHandler("/Home/Error");
                 app.UseHsts();
             }
-            
+
 
             //其他错误页面处理
             app.UseStatusCodePagesWithReExecute("/StatusCode/{0}");
@@ -124,29 +155,41 @@ namespace COMCMS.Web
             app.UseHttpsRedirection();
             app.UseStaticFiles();
             app.UseCookiePolicy();
-            app.UseAuthentication();
             app.UseStaticHttpContext();
+            app.UseRouting();
 
-            app.UseMvc(routes =>
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints =>
             {
-                routes.MapRoute(
+                endpoints.MapControllerRoute(
                   name: "areas",
-                  template: "{area:exists}/{controller=Index}/{action=Index}/{id?}"
+                  pattern: "{area:exists}/{controller=Index}/{action=Index}/{id?}"
                 );
 
-                routes.MapRoute(
+                endpoints.MapControllerRoute(
                     name: "default",
-                    template: "{controller=Home}/{action=Index}/{id?}");
-                routes.MapRoute(
-                name: "article",
-                template: "{title}/index.html",
-                defaults:new { controller ="Home", action= "Article" }
+                    pattern: "{controller=Home}/{action=Index}/{id?}");
+
+                endpoints.MapControllerRoute(
+                name: "index",
+                pattern: "/index.html",
+                defaults: new { controller = "Home", action = "Index" }
                 );
-                routes.MapRoute(
-                name: "article2",
-                template: "{title}/",
-                defaults: new { controller = "Home", action = "Article" }
-                );
+
+                //endpoints.MapControllerRoute(
+                //name: "article",
+                //pattern: "{title}/index.html",
+                //defaults: new { controller = "Home", action = "Article" }
+                //);
+
+                //endpoints.MapControllerRoute(
+                //name: "article2",
+                //pattern: "{title}/",
+                //defaults: new { controller = "Home", action = "Article" }
+                //);
             });
 
             //使用环境变量
@@ -156,7 +199,8 @@ namespace COMCMS.Web
             });
 
             app.UseMiddlewareExtension(new ResultExceptionHandler());
-            IRegisterService register = RegisterService.Start(env, senparcSetting.Value).UseSenparcGlobal();
+            IRegisterService register = RegisterService.Start(senparcSetting.Value).UseSenparcGlobal();
+            register.UseSenparcWeixin(senparcWeixinSetting.Value, senparcSetting.Value);//微信全局注册，必须！
             //加入HttpContext
             //MyHttpContext.ServiceProvider = svp;
         }
